@@ -21,20 +21,21 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 
+_CONFIG_DICT_ATTR_MAP = {
+    "levels": "fan_levels",
+    "mist_levels": "mist_levels",
+    "warm_mist_levels": "warm_mist_levels",
+    "modes": "modes",
+}
+
+
 def has_feature(device, dictionary, attribute):
     """Return the detail of the attribute."""
     if dictionary in ("details", "config"):
         return getattr(device.state, attribute, None) is not None
     elif dictionary == "_config_dict":
-        if attribute == "levels":
-            return len(getattr(device, "fan_levels", ())) > 0
-        elif attribute == "mist_levels":
-            return len(getattr(device, "mist_levels", ())) > 0
-        elif attribute == "warm_mist_levels":
-            return len(getattr(device, "warm_mist_levels", ())) > 0
-        elif attribute == "modes":
-            return len(getattr(device, "modes", ())) > 0
-        return False
+        device_attr = _CONFIG_DICT_ATTR_MAP.get(attribute)
+        return device_attr is not None and len(getattr(device, device_attr, ())) > 0
     return getattr(device, dictionary, {}).get(attribute, None) is not None
 
 
