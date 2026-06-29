@@ -15,6 +15,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from pyvesync.base_devices.humidifier_base import VeSyncHumidifier
 
 from .common import VeSyncDevice
 from .const import (
@@ -99,7 +100,7 @@ class VeSyncHumidifierHA(VeSyncDevice, HumidifierEntity):
     _attr_max_humidity = MAX_HUMIDITY
     _attr_min_humidity = MIN_HUMIDITY
 
-    def __init__(self, humidifier, coordinator) -> None:
+    def __init__(self, humidifier: VeSyncHumidifier, coordinator) -> None:
         """Initialize the VeSync humidifier device."""
         super().__init__(humidifier, coordinator)
         self.smarthumidifier = humidifier
@@ -136,7 +137,7 @@ class VeSyncHumidifierHA(VeSyncDevice, HumidifierEntity):
     @property
     def is_on(self) -> bool:
         """Return True if humidifier is on."""
-        return self.smarthumidifier.is_on
+        return self.smarthumidifier.is_on  # device_status is always on
 
     @property
     def unique_info(self) -> str:

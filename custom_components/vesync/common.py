@@ -95,10 +95,7 @@ async def async_process_devices(hass, manager):
         devices[VS_SENSORS].extend(manager.devices.outlets)
 
     for switch in manager.devices.switches:
-        if not switch.is_dimmable():
-            devices[VS_SWITCHES].append(switch)
-        else:
-            devices[VS_LIGHTS].append(switch)
+        devices[VS_LIGHTS if switch.is_dimmable() else VS_SWITCHES].append(switch)
 
     for airfryer in manager.devices.air_fryers:
         _LOGGER.warning(
@@ -130,6 +127,8 @@ class VeSyncBaseEntity(CoordinatorEntity, Entity):
     @property
     def unique_id(self):
         """Return the ID of this device."""
+        # The unique_id property may be overridden in subclasses, such as in sensors. Maintaining base_unique_id allows
+        # us to group related entities under a single device.
         return self.base_unique_id
 
     @property
