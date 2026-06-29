@@ -27,15 +27,13 @@ def has_feature(device, dictionary, attribute):
         return getattr(device.state, attribute, None) is not None
     elif dictionary == "_config_dict":
         if attribute == "levels":
-            return hasattr(device, "fan_levels") and len(device.fan_levels) > 0
+            return len(getattr(device, "fan_levels", ())) > 0
         elif attribute == "mist_levels":
-            return hasattr(device, "mist_levels") and len(device.mist_levels) > 0
+            return len(getattr(device, "mist_levels", ())) > 0
         elif attribute == "warm_mist_levels":
-            return (
-                hasattr(device, "warm_mist_levels") and len(device.warm_mist_levels) > 0
-            )
+            return len(getattr(device, "warm_mist_levels", ())) > 0
         elif attribute == "modes":
-            return hasattr(device, "modes") and len(device.modes) > 0
+            return len(getattr(device, "modes", ())) > 0
         return False
     return getattr(device, dictionary, {}).get(attribute, None) is not None
 
