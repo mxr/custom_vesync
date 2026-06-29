@@ -76,7 +76,7 @@ class VeSyncFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             password = user_input[CONF_PASSWORD]
             polling_interval = user_input[POLLING_INTERVAL]
             manager = VeSync(username, password)
-            login = await self.hass.async_add_executor_job(manager.login)
+            login = await manager.login()
             if not login:
                 errors["base"] = "invalid_auth"
             else:
@@ -121,7 +121,7 @@ class VeSyncFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             password = user_input[CONF_PASSWORD]
             polling_interval = user_input[POLLING_INTERVAL]
             manager = VeSync(username, password)
-            login = await self.hass.async_add_executor_job(manager.login)
+            login = await manager.login()
             if not login:
                 errors["base"] = "invalid_auth"
             else:

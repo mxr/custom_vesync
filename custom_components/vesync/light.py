@@ -13,9 +13,10 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from pyvesync.const import ProductTypes
 
 from .common import VeSyncDevice, has_feature
-from .const import DEV_TYPE_TO_HA, DOMAIN, VS_DISCOVERY, VS_FAN_TYPES, VS_LIGHTS
+from .const import DEV_TYPE_TO_HA, DOMAIN, VS_DISCOVERY, VS_LIGHTS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ def _setup_entities(devices, async_add_entities, coordinator):
             entities.append(VeSyncDimmableLightHA(dev, coordinator))
         if DEV_TYPE_TO_HA.get(dev.device_type) in ("bulb-tunable-white",):
             entities.append(VeSyncTunableWhiteLightHA(dev, coordinator))
-        if hasattr(dev, "night_light") and dev.night_light:
+        if getattr(dev, "supports_nightlight", False):
             entities.append(VeSyncNightLightHA(dev, coordinator))
 
     async_add_entities(entities, update_before_add=True)
@@ -62,25 +63,19 @@ def _setup_entities(devices, async_add_entities, coordinator):
 
 def _vesync_brightness_to_ha(vesync_brightness):
     try:
-        # check for validity of brightness value received
         brightness_value = int(vesync_brightness)
-    except ValueError:
-        # deal if any unexpected/non numeric value
+    except (ValueError, TypeError):
         _LOGGER.debug(
             "VeSync - received unexpected 'brightness' value from pyvesync api: %s",
             vesync_brightness,
         )
         return None
-    # convert percent brightness to ha expected range
     return round((max(1, brightness_value) / 100) * 255)
 
 
 def _ha_brightness_to_vesync(ha_brightness):
-    # get brightness from HA data
     brightness = int(ha_brightness)
-    # ensure value between 1-255
     brightness = max(1, min(brightness, 255))
-    # convert to percent that vesync api expects
     brightness = round((brightness / 255) * 100)
     return max(1, min(brightness, 100))
 
@@ -88,56 +83,42 @@ def _ha_brightness_to_vesync(ha_brightness):
 class VeSyncBaseLight(VeSyncDevice, LightEntity):
     """Base class for VeSync Light Devices Representations."""
 
-    def __init_(self, light, coordinator):
+    def __init__(self, light, coordinator):
         """Initialize the VeSync light device."""
         super().__init__(light, coordinator)
 
     @property
     def brightness(self):
         """Get light brightness."""
-        # get value from pyvesync library api,
-        return _vesync_brightness_to_ha(self.device.brightness)
+        return _vesync_brightness_to_ha(self.device.state.brightness)
 
-    def turn_on(self, **kwargs):
+    async def async_turn_on(self, **kwargs):
         """Turn the device on."""
         attribute_adjustment_only = False
-        # set white temperature
         if (
             self.color_mode in (ColorMode.COLOR_TEMP,)
             and ATTR_COLOR_TEMP_KELVIN in kwargs
         ):
-            # get white temperature from HA data
             color_temp = int(kwargs[ATTR_COLOR_TEMP_KELVIN])
-            # ensure value between min-max supported Mireds
             color_temp = max(self.min_mireds, min(color_temp, self.max_mireds))
-            # convert Mireds to Percent value that api expects
             color_temp = round(
                 ((color_temp - self.min_mireds) / (self.max_mireds - self.min_mireds))
                 * 100
             )
-            # flip cold/warm to what pyvesync api expects
             color_temp = 100 - color_temp
-            # ensure value between 0-100
             color_temp = max(0, min(color_temp, 100))
-            # call pyvesync library api method to set color_temp
-            self.device.set_color_temp(color_temp)
-            # flag attribute_adjustment_only, so it doesn't turn_on the device redundantly
+            await self.device.set_color_temp(color_temp)
             attribute_adjustment_only = True
-        # set brightness level
         if (
             self.color_mode in (ColorMode.BRIGHTNESS, ColorMode.COLOR_TEMP)
             and ATTR_BRIGHTNESS in kwargs
         ):
-            # get brightness from HA data
             brightness = _ha_brightness_to_vesync(kwargs[ATTR_BRIGHTNESS])
-            self.device.set_brightness(brightness)
-            # flag attribute_adjustment_only, so it doesn't turn_on the device redundantly
+            await self.device.set_brightness(brightness)
             attribute_adjustment_only = True
-        # check flag if should skip sending the turn_on command
         if attribute_adjustment_only:
             return
-        # send turn_on command to pyvesync api
-        self.device.turn_on()
+        await self.device.turn_on()
 
 
 class VeSyncDimmableLightHA(VeSyncBaseLight, LightEntity):
@@ -168,39 +149,32 @@ class VeSyncTunableWhiteLightHA(VeSyncBaseLight, LightEntity):
     @property
     def color_temp(self):
         """Get device white temperature."""
-        # get value from pyvesync library api,
-        result = self.device.color_temp_pct
+        result = self.device.state.color_temp
         try:
-            # check for validity of brightness value received
             color_temp_value = int(result)
-        except ValueError:
-            # deal if any unexpected/non numeric value
+        except (ValueError, TypeError):
             _LOGGER.debug(
-                "VeSync - received unexpected 'color_temp_pct' value from pyvesync api: %s",
+                "VeSync - received unexpected 'color_temp' value from pyvesync api: %s",
                 result,
             )
             return 0
-        # flip cold/warm
         color_temp_value = 100 - color_temp_value
-        # ensure value between 0-100
         color_temp_value = max(0, min(color_temp_value, 100))
-        # convert percent value to Mireds
         color_temp_value = round(
             self.min_mireds
             + ((self.max_mireds - self.min_mireds) / 100 * color_temp_value)
         )
-        # ensure value between minimum and maximum Mireds
         return max(self.min_mireds, min(color_temp_value, self.max_mireds))
 
     @property
     def min_mireds(self):
         """Set device coldest white temperature."""
-        return 154  # 154 Mireds ( 1,000,000 divided by 6500 Kelvin = 154 Mireds)
+        return 154
 
     @property
     def max_mireds(self):
         """Set device warmest white temperature."""
-        return 370  # 370 Mireds  ( 1,000,000 divided by 2700 Kelvin = 370 Mireds)
+        return 370
 
     @property
     def color_mode(self):
@@ -221,7 +195,7 @@ class VeSyncNightLightHA(VeSyncDimmableLightHA):
         super().__init__(device, coordinator)
         self.device = device
         self.has_brightness = has_feature(
-            self.device, "details", "night_light_brightness"
+            self.device, "details", "nightlight_brightness"
         )
 
     @property
@@ -237,42 +211,42 @@ class VeSyncNightLightHA(VeSyncDimmableLightHA):
     @property
     def brightness(self):
         """Get night light brightness."""
-        return (
-            _vesync_brightness_to_ha(self.device.details["night_light_brightness"])
-            if self.has_brightness
-            else {"on": 255, "dim": 125, "off": 0}[self.device.details["night_light"]]
-        )
+        if self.has_brightness:
+            return _vesync_brightness_to_ha(self.device.state.nightlight_brightness)
+        status = self.device.state.nightlight_status
+        return {"on": 255, "dim": 125, "off": 0}.get(status, 0)
 
     @property
     def is_on(self):
         """Return True if night light is on."""
-        if has_feature(self.device, "details", "night_light"):
-            return self.device.details["night_light"] in ["on", "dim"]
         if self.has_brightness:
-            return self.device.details["night_light_brightness"] > 0
+            brightness = self.device.state.nightlight_brightness
+            return brightness is not None and brightness > 0
+        status = self.device.state.nightlight_status
+        return status in ["on", "dim"]
 
     @property
     def entity_category(self):
         """Return the configuration entity category."""
         return EntityCategory.CONFIG
 
-    def turn_on(self, **kwargs):
+    async def async_turn_on(self, **kwargs):
         """Turn the night light on."""
-        if self.device._config_dict["module"] in VS_FAN_TYPES:
+        if self.device.product_type in (ProductTypes.PURIFIER, ProductTypes.FAN):
             if ATTR_BRIGHTNESS in kwargs and kwargs[ATTR_BRIGHTNESS] < 255:
-                self.device.set_night_light("dim")
+                await self.device.set_nightlight_mode("dim")
             else:
-                self.device.set_night_light("on")
+                await self.device.set_nightlight_mode("on")
         elif ATTR_BRIGHTNESS in kwargs:
-            self.device.set_night_light_brightness(
+            await self.device.set_nightlight_brightness(
                 _ha_brightness_to_vesync(kwargs[ATTR_BRIGHTNESS])
             )
         else:
-            self.device.set_night_light_brightness(100)
+            await self.device.set_nightlight_brightness(100)
 
-    def turn_off(self, **kwargs):
+    async def async_turn_off(self, **kwargs):
         """Turn the night light off."""
-        if self.device._config_dict["module"] in VS_FAN_TYPES:
-            self.device.set_night_light("off")
+        if self.device.product_type in (ProductTypes.PURIFIER, ProductTypes.FAN):
+            await self.device.set_nightlight_mode("off")
         else:
-            self.device.set_night_light_brightness(0)
+            await self.device.set_nightlight_brightness(0)
